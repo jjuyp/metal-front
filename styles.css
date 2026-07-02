@@ -166,7 +166,7 @@ button:active {
   box-shadow: 0 3px 0 #8e2c25;
 }
 
-.actions button:nth-child(2) {
+.stick button:nth-child(2) {
   background: rgba(122, 215, 255, 0.94);
   box-shadow: 0 3px 0 #2d6f91;
 }
