@@ -33,3 +33,7 @@ python -m http.server 4173 --bind 127.0.0.1
 ```text
 http://127.0.0.1:4173/metal-front/index.html
 ```
+
+## 手機建議
+
+iPhone Safari 橫向時，如果上方網址列或分頁列佔掉太多空間，請用分享按鈕把頁面「加入主畫面」，再從主畫面開啟。這個版本有加 fullscreen/landscape PWA 設定，主畫面開啟會比 Safari 分頁內更適合遊玩。
