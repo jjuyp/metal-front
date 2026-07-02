@@ -30,6 +30,12 @@ const LEVELS = [
     length: 2550,
     sky: ["#26384a", "#18212d"],
     ground: "#57422d",
+    platforms: [
+      { x: 430, y: 500, w: 180, h: 18 },
+      { x: 930, y: 440, w: 220, h: 18 },
+      { x: 1450, y: 488, w: 190, h: 18 },
+      { x: 1920, y: 420, w: 240, h: 18 }
+    ],
     checkpoints: [620, 1320, 2020],
     spawnEvery: 1550,
     enemyCap: 7,
@@ -50,6 +56,12 @@ const LEVELS = [
     length: 2900,
     sky: ["#253b2f", "#16241d"],
     ground: "#4b5030",
+    platforms: [
+      { x: 500, y: 492, w: 210, h: 18 },
+      { x: 1040, y: 430, w: 180, h: 18 },
+      { x: 1540, y: 500, w: 260, h: 18 },
+      { x: 2200, y: 438, w: 220, h: 18 }
+    ],
     checkpoints: [760, 1580, 2320],
     spawnEvery: 1350,
     enemyCap: 8,
@@ -71,6 +83,12 @@ const LEVELS = [
     length: 3200,
     sky: ["#5b4736", "#241e1b"],
     ground: "#6d563b",
+    platforms: [
+      { x: 560, y: 496, w: 200, h: 18 },
+      { x: 1120, y: 452, w: 260, h: 18 },
+      { x: 1780, y: 504, w: 220, h: 18 },
+      { x: 2440, y: 424, w: 250, h: 18 }
+    ],
     checkpoints: [850, 1680, 2520],
     spawnEvery: 1250,
     enemyCap: 9,
@@ -92,6 +110,13 @@ const LEVELS = [
     length: 3450,
     sky: ["#3e5564", "#18242b"],
     ground: "#61717a",
+    platforms: [
+      { x: 520, y: 486, w: 230, h: 18 },
+      { x: 1160, y: 426, w: 190, h: 18 },
+      { x: 1760, y: 502, w: 270, h: 18 },
+      { x: 2480, y: 446, w: 260, h: 18 },
+      { x: 2940, y: 386, w: 190, h: 18 }
+    ],
     checkpoints: [910, 1860, 2760],
     spawnEvery: 1150,
     enemyCap: 10,
@@ -114,6 +139,14 @@ const LEVELS = [
     length: 3800,
     sky: ["#2f2c39", "#111218"],
     ground: "#3f4248",
+    platforms: [
+      { x: 500, y: 490, w: 230, h: 18 },
+      { x: 1080, y: 430, w: 210, h: 18 },
+      { x: 1620, y: 500, w: 260, h: 18 },
+      { x: 2250, y: 438, w: 230, h: 18 },
+      { x: 2860, y: 382, w: 250, h: 18 },
+      { x: 3320, y: 472, w: 220, h: 18 }
+    ],
     checkpoints: [960, 1980, 3040],
     spawnEvery: 1000,
     enemyCap: 12,
@@ -173,6 +206,7 @@ function newRun(levelIndex = 0, checkpointX = 90) {
       lives: 3,
       grenades: 4,
       onGround: true,
+      groundY: FLOOR,
       invuln: 1600,
       weapon: "rifle",
       ammo: Infinity,
@@ -213,7 +247,13 @@ function makeEnemy(type, x) {
     color: stats.color,
     boss: Boolean(stats.boss),
     lastShot: 0,
-    hurtFlash: 0
+    hurtFlash: 0,
+    vy: 0,
+    onGround: true,
+    groundY: FLOOR,
+    nextJump: 500 + Math.random() * 1200,
+    dodgeUntil: 0,
+    patrol: Math.random() > 0.5 ? 1 : -1
   };
 }
 
@@ -296,12 +336,7 @@ function update(dt) {
 
   p.vy += GRAVITY;
   p.x = clamp(p.x + p.vx, 20, level.length - 90);
-  p.y += p.vy;
-  if (p.y + p.h >= FLOOR) {
-    p.y = FLOOR - p.h;
-    p.vy = 0;
-    p.onGround = true;
-  }
+  moveWithPlatforms(p, level);
 
   for (const cp of level.checkpoints) {
     if (p.x > cp && cp > state.checkpointX) {
@@ -364,6 +399,36 @@ function throwGrenade() {
     vy: -11,
     fuse: 720
   });
+}
+
+function moveWithPlatforms(actor, level) {
+  const previousBottom = actor.y + actor.h;
+  actor.y += actor.vy;
+  actor.onGround = false;
+  actor.groundY = FLOOR;
+
+  if (actor.vy >= 0) {
+    for (const platform of level.platforms || []) {
+      const actorRight = actor.x + actor.w;
+      const actorLeft = actor.x;
+      const withinX = actorRight > platform.x + 8 && actorLeft < platform.x + platform.w - 8;
+      const crossedTop = previousBottom <= platform.y + 8 && actor.y + actor.h >= platform.y;
+      if (withinX && crossedTop) {
+        actor.y = platform.y - actor.h;
+        actor.vy = 0;
+        actor.onGround = true;
+        actor.groundY = platform.y;
+        return;
+      }
+    }
+  }
+
+  if (actor.y + actor.h >= FLOOR) {
+    actor.y = FLOOR - actor.h;
+    actor.vy = 0;
+    actor.onGround = true;
+    actor.groundY = FLOOR;
+  }
 }
 
 function spawnEnemies(level) {
@@ -429,15 +494,65 @@ function updateBullets(dt) {
 
 function updateEnemies(dt) {
   const p = state.player;
+  const level = LEVELS[state.levelIndex];
   for (const e of state.enemies) {
     if (Math.abs(e.x - p.x) > 900) continue;
     const dir = p.x > e.x ? 1 : -1;
     const dist = Math.abs(p.x - e.x);
     e.hurtFlash = Math.max(0, e.hurtFlash - dt);
-    if (dist > e.range * 0.55) {
+    e.nextJump -= dt;
+    e.dodgeUntil = Math.max(0, e.dodgeUntil - dt);
+
+    if (e.type === "runner") {
+      e.x += e.speed * (dist > 44 ? 1.45 : 0.3) * dir;
+      if (e.onGround && e.nextJump <= 0 && (Math.abs(p.y - e.y) > 34 || dist < 180)) {
+        e.vy = p.y + p.h < e.y ? -15.5 : -12.5;
+        e.onGround = false;
+        e.nextJump = 900 + Math.random() * 1050;
+      }
+    } else if (e.type === "rifle") {
+      if (dist < 210) {
+        e.x -= e.speed * 1.35 * dir;
+      } else if (dist > e.range * 0.74) {
+        e.x += e.speed * 1.15 * dir;
+      } else {
+        e.x += Math.sin(state.time / 260 + e.x) * 0.45;
+      }
+      if (e.onGround && e.nextJump <= 0 && Math.random() < 0.35) {
+        e.vy = -12;
+        e.onGround = false;
+        e.nextJump = 1400 + Math.random() * 1300;
+      }
+    } else if (e.type === "shield") {
+      e.x += e.speed * (dist > 70 ? 1.05 : -0.45) * dir;
+      if (e.onGround && e.nextJump <= 0 && p.y + p.h < e.y + 10) {
+        e.vy = -13.5;
+        e.onGround = false;
+        e.nextJump = 1600 + Math.random() * 1200;
+      }
+    } else if (e.boss) {
+      e.x += e.speed * (dist > e.range * 0.5 ? 0.8 : -0.35) * dir;
+      if (e.onGround && e.nextJump <= 0 && e.type !== "turret") {
+        e.vy = -10;
+        e.onGround = false;
+        e.nextJump = 1800 + Math.random() * 1400;
+      }
+    } else if (dist > e.range * 0.55) {
       e.x += e.speed * dir;
-    } else if (e.type === "runner") {
-      e.x += e.speed * 1.3 * dir;
+    }
+
+    e.x = clamp(e.x, 20, level.length - e.w - 30);
+    e.vy += GRAVITY;
+    moveWithPlatforms(e, level);
+
+    for (const b of state.bullets) {
+      const incoming = Math.abs(b.x - (e.x + e.w / 2)) < 130 && Math.sign(b.vx) === Math.sign(e.x - b.x);
+      if (incoming && e.onGround && !e.boss && e.dodgeUntil <= 0) {
+        e.vy = -11.5;
+        e.onGround = false;
+        e.dodgeUntil = 900;
+        break;
+      }
     }
     if (dist < e.range && state.time - e.lastShot > (e.boss ? 720 : 1150)) {
       e.lastShot = state.time;
@@ -666,6 +781,16 @@ function drawBackground(level, cam) {
 }
 
 function drawForeground(level, cam) {
+  for (const platform of level.platforms || []) {
+    const x = platform.x - cam;
+    if (x < -platform.w || x > WIDTH + 40) continue;
+    ctx.fillStyle = "rgba(0,0,0,0.32)";
+    ctx.fillRect(x + 6, platform.y + 8, platform.w, platform.h);
+    ctx.fillStyle = "#d8b45b";
+    ctx.fillRect(x, platform.y, platform.w, platform.h);
+    ctx.fillStyle = "#725632";
+    ctx.fillRect(x + 8, platform.y + platform.h - 5, platform.w - 16, 5);
+  }
   ctx.fillStyle = level.ground;
   ctx.fillRect(0, FLOOR, WIDTH, HEIGHT - FLOOR);
   ctx.fillStyle = "rgba(0,0,0,0.24)";
@@ -806,6 +931,29 @@ function clamp(value, min, max) {
 }
 
 function bindControls() {
+  let lastTouchEnd = 0;
+  const stopBrowserGesture = (event) => event.preventDefault();
+
+  ["gesturestart", "gesturechange", "gestureend"].forEach((name) => {
+    document.addEventListener(name, stopBrowserGesture, { passive: false });
+  });
+
+  document.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener("touchend", (event) => {
+    const now = Date.now();
+    if (now - lastTouchEnd < 360) {
+      event.preventDefault();
+    }
+    lastTouchEnd = now;
+  }, { passive: false });
+
+  document.addEventListener("touchmove", (event) => {
+    event.preventDefault();
+  }, { passive: false });
+
   window.addEventListener("keydown", (event) => {
     if (event.repeat) return;
     if (event.code === "KeyA" || event.code === "ArrowLeft") input.left = true;
