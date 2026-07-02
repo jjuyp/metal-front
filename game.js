@@ -23,6 +23,11 @@ const WIDTH = canvas.width;
 const HEIGHT = canvas.height;
 const FLOOR = 616;
 const GRAVITY = 0.9;
+const DIFFICULTY_STEP = 1.5;
+
+function difficultyFor(levelIndex) {
+  return DIFFICULTY_STEP ** levelIndex;
+}
 
 const LEVELS = [
   {
@@ -42,6 +47,7 @@ const LEVELS = [
     enemies: [
       { x: 720, type: "rifle" },
       { x: 1080, type: "runner" },
+      { x: 1320, type: "dropper" },
       { x: 1550, type: "shield" },
       { x: 2050, type: "rifle" }
     ],
@@ -68,7 +74,9 @@ const LEVELS = [
     enemies: [
       { x: 620, type: "runner" },
       { x: 1120, type: "rifle" },
+      { x: 1320, type: "dropper" },
       { x: 1500, type: "runner" },
+      { x: 1760, type: "flyer" },
       { x: 1980, type: "shield" },
       { x: 2360, type: "rifle" }
     ],
@@ -94,9 +102,12 @@ const LEVELS = [
     enemyCap: 9,
     enemies: [
       { x: 760, type: "rifle" },
+      { x: 980, type: "dropper" },
       { x: 1160, type: "shield" },
       { x: 1650, type: "runner" },
+      { x: 1940, type: "flyer" },
       { x: 2170, type: "rifle" },
+      { x: 2380, type: "dropper" },
       { x: 2620, type: "shield" }
     ],
     pickups: [
@@ -122,10 +133,13 @@ const LEVELS = [
     enemyCap: 10,
     enemies: [
       { x: 700, type: "runner" },
+      { x: 930, type: "flyer" },
       { x: 1160, type: "rifle" },
       { x: 1570, type: "shield" },
+      { x: 1900, type: "dropper" },
       { x: 2150, type: "rifle" },
       { x: 2680, type: "runner" },
+      { x: 2860, type: "flyer" },
       { x: 3040, type: "shield" }
     ],
     pickups: [
@@ -152,11 +166,15 @@ const LEVELS = [
     enemyCap: 12,
     enemies: [
       { x: 720, type: "rifle" },
+      { x: 960, type: "flyer" },
       { x: 1120, type: "runner" },
       { x: 1500, type: "shield" },
+      { x: 1780, type: "dropper" },
       { x: 2010, type: "rifle" },
       { x: 2450, type: "runner" },
+      { x: 2720, type: "flyer" },
       { x: 2920, type: "shield" },
+      { x: 3100, type: "dropper" },
       { x: 3260, type: "rifle" }
     ],
     pickups: [
@@ -216,44 +234,64 @@ function newRun(levelIndex = 0, checkpointX = 90) {
     bullets: [],
     enemyBullets: [],
     grenades: [],
-    enemies: level.enemies.map((e) => makeEnemy(e.type, e.x)),
+    enemies: level.enemies.map((e) => makeEnemy(e.type, e.x, levelIndex)),
     pickups: level.pickups.map((p) => makePickup(p.type, p.x)),
     effects: []
   };
 }
 
-function makeEnemy(type, x) {
+function makeEnemy(type, x, levelIndex = 0) {
+  const difficulty = difficultyFor(levelIndex);
   const stats = {
-    runner: { hp: 28, speed: 1.8, range: 80, color: "#ffcf5a" },
-    rifle: { hp: 42, speed: 0.7, range: 420, color: "#f05d4f" },
-    shield: { hp: 72, speed: 0.45, range: 320, color: "#93a1ad" },
-    turret: { hp: 90, speed: 0, range: 560, color: "#ff8a47", boss: true },
-    walker: { hp: 120, speed: 0.55, range: 540, color: "#b3e56d", boss: true },
-    cannon: { hp: 150, speed: 0.4, range: 590, color: "#ff9d66", boss: true },
-    bunker: { hp: 180, speed: 0.25, range: 620, color: "#a8d8ff", boss: true },
-    core: { hp: 240, speed: 0.35, range: 660, color: "#d388ff", boss: true }
+    runner: { hp: 28, speed: 1.8, range: 90, color: "#ffcf5a", damage: 14, cooldown: 1200 },
+    rifle: { hp: 42, speed: 0.7, range: 430, color: "#f05d4f", damage: 12, cooldown: 1160 },
+    shield: { hp: 72, speed: 0.45, range: 330, color: "#93a1ad", damage: 18, cooldown: 1280 },
+    dropper: { hp: 36, speed: 1.45, range: 280, color: "#ff7a59", damage: 16, cooldown: 980, dropper: true },
+    flyer: { hp: 34, speed: 1.35, range: 520, color: "#75d6ff", damage: 13, cooldown: 900, airborne: true },
+    turret: { hp: 90, speed: 0, range: 560, color: "#ff8a47", damage: 18, cooldown: 720, boss: true },
+    walker: { hp: 120, speed: 0.55, range: 540, color: "#b3e56d", damage: 20, cooldown: 700, boss: true },
+    cannon: { hp: 150, speed: 0.4, range: 590, color: "#ff9d66", damage: 22, cooldown: 680, boss: true },
+    bunker: { hp: 180, speed: 0.25, range: 620, color: "#a8d8ff", damage: 24, cooldown: 640, boss: true },
+    core: { hp: 240, speed: 0.35, range: 660, color: "#d388ff", damage: 28, cooldown: 600, boss: true }
   }[type];
+  const isAirborne = Boolean(stats.airborne);
+  const isBoss = Boolean(stats.boss);
+  const hpScale = isBoss ? 1 + (difficulty - 1) * 0.75 : difficulty;
+  const speedScale = 1 + (difficulty - 1) * 0.12;
+  const cooldownScale = Math.max(0.38, 1 / difficulty);
+  const height = isBoss ? 112 : isAirborne ? 44 : 62;
+  const width = isBoss ? 94 : isAirborne ? 54 : 42;
   return {
     type,
     x,
-    y: FLOOR - (stats.boss ? 112 : 62),
-    w: stats.boss ? 94 : 42,
-    h: stats.boss ? 112 : 62,
+    y: isAirborne ? 250 + Math.random() * 140 : FLOOR - height,
+    homeY: isAirborne ? 250 + Math.random() * 120 : FLOOR - height,
+    w: width,
+    h: height,
     vx: 0,
-    hp: stats.hp,
-    maxHp: stats.hp,
-    speed: stats.speed,
+    hp: Math.ceil(stats.hp * hpScale),
+    maxHp: Math.ceil(stats.hp * hpScale),
+    speed: stats.speed * speedScale,
     range: stats.range,
     color: stats.color,
-    boss: Boolean(stats.boss),
+    boss: isBoss,
+    airborne: isAirborne,
+    dropper: Boolean(stats.dropper),
+    difficulty,
+    bulletDamage: Math.ceil(stats.damage * difficulty),
+    touchDamage: Math.ceil((stats.damage + 4) * difficulty),
+    shotCooldown: Math.max(260, stats.cooldown * cooldownScale),
+    bulletSpeed: (isBoss ? 6 : isAirborne ? 6.6 : 5) * (1 + (difficulty - 1) * 0.08),
+    shots: isBoss ? Math.min(5, 3 + Math.floor(levelIndex / 2)) : isAirborne && levelIndex >= 3 ? 2 : 1,
     lastShot: 0,
     hurtFlash: 0,
     vy: 0,
-    onGround: true,
+    onGround: !isAirborne,
     groundY: FLOOR,
-    nextJump: 500 + Math.random() * 1200,
+    nextJump: 400 + Math.random() * 900,
     dodgeUntil: 0,
-    patrol: Math.random() > 0.5 ? 1 : -1
+    patrol: Math.random() > 0.5 ? 1 : -1,
+    phase: Math.random() * Math.PI * 2
   };
 }
 
@@ -432,18 +470,36 @@ function moveWithPlatforms(actor, level) {
 }
 
 function spawnEnemies(level) {
-  if (state.enemies.length >= level.enemyCap || state.time < state.nextSpawn) return;
+  const difficulty = difficultyFor(state.levelIndex);
+  const activeCap = Math.ceil(level.enemyCap + state.levelIndex * 2.5 + difficulty);
+  if (state.enemies.length >= activeCap || state.time < state.nextSpawn) return;
   const ahead = state.camera + WIDTH + 80;
   if (ahead > level.length - 280) return;
-  const types = state.levelIndex > 2 ? ["rifle", "runner", "shield"] : ["rifle", "runner"];
+  const pools = [
+    ["rifle", "runner", "runner", "dropper"],
+    ["rifle", "runner", "runner", "shield", "dropper", "flyer"],
+    ["rifle", "runner", "shield", "dropper", "dropper", "flyer"],
+    ["rifle", "runner", "shield", "dropper", "flyer", "flyer", "shield"],
+    ["rifle", "runner", "shield", "dropper", "dropper", "flyer", "flyer", "shield"]
+  ];
+  const types = pools[state.levelIndex] || pools[pools.length - 1];
   const type = types[Math.floor(Math.random() * types.length)];
-  state.enemies.push(makeEnemy(type, ahead + Math.random() * 220));
-  state.nextSpawn = state.time + level.spawnEvery;
+  const enemy = makeEnemy(type, ahead + Math.random() * 220, state.levelIndex);
+  if (type === "dropper") {
+    const platform = (level.platforms || []).find((p) => p.x > state.player.x + 180 && p.x < state.player.x + 950);
+    if (platform) {
+      enemy.x = platform.x + platform.w * (0.25 + Math.random() * 0.5);
+      enemy.y = platform.y - enemy.h;
+      enemy.groundY = platform.y;
+    }
+  }
+  state.enemies.push(enemy);
+  state.nextSpawn = state.time + Math.max(360, level.spawnEvery / difficulty);
 }
 
 function spawnBoss(level) {
   if (state.bossSpawned || state.player.x < level.boss.x - 520) return;
-  state.enemies.push(makeEnemy(level.boss.type, level.boss.x));
+  state.enemies.push(makeEnemy(level.boss.type, level.boss.x, state.levelIndex));
   state.bossSpawned = true;
   toast("敵方重裝單位出現");
 }
@@ -503,7 +559,26 @@ function updateEnemies(dt) {
     e.nextJump -= dt;
     e.dodgeUntil = Math.max(0, e.dodgeUntil - dt);
 
-    if (e.type === "runner") {
+    if (e.airborne) {
+      const targetY = clamp(p.y - 90 + Math.sin(state.time / 420 + e.phase) * 54, 140, FLOOR - 190);
+      e.x += e.speed * (dist > 260 ? dir : -0.55 * dir);
+      e.y += (targetY - e.y) * 0.035;
+      e.y += Math.sin(state.time / 170 + e.phase) * 0.85;
+      e.onGround = false;
+    } else if (e.type === "dropper") {
+      if (e.onGround && e.groundY < FLOOR && dist < 360) {
+        e.vy = -7.5;
+        e.x += e.speed * 2.8 * dir;
+        e.onGround = false;
+      } else {
+        e.x += e.speed * (dist > 58 ? 1.65 : 0.35) * dir;
+      }
+      if (e.onGround && e.nextJump <= 0) {
+        e.vy = -14;
+        e.onGround = false;
+        e.nextJump = 760 + Math.random() * 760;
+      }
+    } else if (e.type === "runner") {
       e.x += e.speed * (dist > 44 ? 1.45 : 0.3) * dir;
       if (e.onGround && e.nextJump <= 0 && (Math.abs(p.y - e.y) > 34 || dist < 180)) {
         e.vy = p.y + p.h < e.y ? -15.5 : -12.5;
@@ -542,8 +617,10 @@ function updateEnemies(dt) {
     }
 
     e.x = clamp(e.x, 20, level.length - e.w - 30);
-    e.vy += GRAVITY;
-    moveWithPlatforms(e, level);
+    if (!e.airborne) {
+      e.vy += GRAVITY;
+      moveWithPlatforms(e, level);
+    }
 
     for (const b of state.bullets) {
       const incoming = Math.abs(b.x - (e.x + e.w / 2)) < 130 && Math.sign(b.vx) === Math.sign(e.x - b.x);
@@ -554,28 +631,31 @@ function updateEnemies(dt) {
         break;
       }
     }
-    if (dist < e.range && state.time - e.lastShot > (e.boss ? 720 : 1150)) {
+    if (dist < e.range && state.time - e.lastShot > e.shotCooldown) {
       e.lastShot = state.time;
       enemyShoot(e, dir);
     }
     if (p.invuln <= 0 && overlap(p, e)) {
-      hurtPlayer(e.boss ? 28 : 18);
+      hurtPlayer(e.touchDamage);
     }
   }
   state.enemies = state.enemies.filter((e) => e.hp > 0);
 }
 
 function enemyShoot(e, dir) {
-  const shots = e.boss ? 3 : 1;
+  const shots = e.shots || (e.boss ? 3 : 1);
   for (let i = 0; i < shots; i++) {
+    const offset = i - (shots - 1) / 2;
+    const aimY = state.player.y + state.player.h * 0.45 - (e.y + e.h * 0.42);
+    const vy = e.airborne ? clamp(aimY / 90, -3.2, 3.2) + offset * 1.2 : offset * 1.4;
     state.enemyBullets.push({
       x: e.x + e.w / 2,
       y: e.y + e.h * 0.42,
-      vx: (e.boss ? 6 : 5) * dir,
-      vy: (i - 1) * 1.4,
-      r: e.boss ? 6 : 4,
-      damage: e.boss ? 18 : 12,
-      color: e.boss ? "#ff8a47" : "#f05d4f",
+      vx: e.bulletSpeed * dir,
+      vy,
+      r: e.boss ? 6 : e.airborne ? 5 : 4,
+      damage: e.bulletDamage,
+      color: e.boss ? "#ff8a47" : e.airborne ? "#75d6ff" : "#f05d4f",
       life: 1500
     });
   }
@@ -834,9 +914,23 @@ function drawEnemies(cam) {
     const x = e.x - cam;
     if (x < -140 || x > WIDTH + 140) continue;
     ctx.fillStyle = e.hurtFlash > 0 ? "#fff7e0" : e.color;
-    ctx.fillRect(x, e.y + 10, e.w, e.h - 10);
+    if (e.airborne) {
+      ctx.beginPath();
+      ctx.ellipse(x + e.w / 2, e.y + e.h / 2, e.w / 2, e.h / 2.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#1d2026";
+      ctx.fillRect(x + 8, e.y + e.h * 0.42, e.w - 16, 7);
+      ctx.fillStyle = "#dff7ff";
+      ctx.fillRect(x + e.w * 0.38, e.y + 9, e.w * 0.24, 8);
+    } else {
+      ctx.fillRect(x, e.y + 10, e.w, e.h - 10);
+    }
     ctx.fillStyle = "#1d2026";
-    ctx.fillRect(x + e.w * 0.18, e.y, e.w * 0.64, 18);
+    ctx.fillRect(x + e.w * 0.18, e.y, e.w * 0.64, e.airborne ? 8 : 18);
+    if (e.type === "dropper") {
+      ctx.fillStyle = "#ffd166";
+      ctx.fillRect(x + 8, e.y + 18, e.w - 16, 8);
+    }
     if (e.type === "shield") {
       ctx.fillStyle = "rgba(230,240,255,0.55)";
       ctx.fillRect(x - 8, e.y + 8, 12, e.h - 8);
