@@ -23,10 +23,10 @@ const WIDTH = canvas.width;
 const HEIGHT = canvas.height;
 const FLOOR = 616;
 const GRAVITY = 0.9;
-const DIFFICULTY_STEP = 1.5;
+const DIFFICULTY_CURVE = [1, 1.25, 1.55, 1.9, 2.35];
 
 function difficultyFor(levelIndex) {
-  return DIFFICULTY_STEP ** levelIndex;
+  return DIFFICULTY_CURVE[levelIndex] || DIFFICULTY_CURVE[DIFFICULTY_CURVE.length - 1];
 }
 
 const LEVELS = [
@@ -53,7 +53,9 @@ const LEVELS = [
     ],
     pickups: [
       { x: 870, type: "spread" },
-      { x: 1710, type: "heal" }
+      { x: 1210, type: "shield" },
+      { x: 1710, type: "heal" },
+      { x: 2140, type: "rapid" }
     ],
     boss: { x: 2380, hp: 90, type: "turret" }
   },
@@ -82,7 +84,9 @@ const LEVELS = [
     ],
     pickups: [
       { x: 980, type: "laser" },
-      { x: 1880, type: "grenades" }
+      { x: 1360, type: "ammo" },
+      { x: 1880, type: "grenades" },
+      { x: 2280, type: "shield" }
     ],
     boss: { x: 2720, hp: 120, type: "walker" }
   },
@@ -112,7 +116,9 @@ const LEVELS = [
     ],
     pickups: [
       { x: 1240, type: "rocket" },
-      { x: 2110, type: "heal" }
+      { x: 1680, type: "rapid" },
+      { x: 2110, type: "heal" },
+      { x: 2680, type: "ammo" }
     ],
     boss: { x: 3020, hp: 150, type: "cannon" }
   },
@@ -144,7 +150,9 @@ const LEVELS = [
     ],
     pickups: [
       { x: 1440, type: "spread" },
-      { x: 2460, type: "laser" }
+      { x: 1880, type: "shield" },
+      { x: 2460, type: "laser" },
+      { x: 3040, type: "life" }
     ],
     boss: { x: 3260, hp: 180, type: "bunker" }
   },
@@ -179,8 +187,11 @@ const LEVELS = [
     ],
     pickups: [
       { x: 1320, type: "rocket" },
+      { x: 1780, type: "shield" },
       { x: 2250, type: "heal" },
-      { x: 2920, type: "grenades" }
+      { x: 2580, type: "rapid" },
+      { x: 2920, type: "grenades" },
+      { x: 3340, type: "ammo" }
     ],
     boss: { x: 3600, hp: 240, type: "core" }
   }
@@ -193,7 +204,7 @@ const WEAPONS = {
   rocket: { label: "火箭", cooldown: 430, speed: 10, damage: 42, count: 1, spread: 0, ammo: 30, color: "#ff8a47", explosive: true }
 };
 
-const input = { left: false, right: false, shoot: false };
+const input = { left: false, right: false, down: false, shoot: false };
 const pressed = new Set();
 let state = null;
 let lastTime = performance.now();
@@ -217,6 +228,8 @@ function newRun(levelIndex = 0, checkpointX = 90) {
       y: FLOOR - 76,
       w: 42,
       h: 76,
+      standH: 76,
+      crouchH: 46,
       vx: 0,
       vy: 0,
       facing: 1,
@@ -224,8 +237,11 @@ function newRun(levelIndex = 0, checkpointX = 90) {
       lives: 3,
       grenades: 4,
       onGround: true,
+      crouching: false,
       groundY: FLOOR,
       invuln: 1600,
+      shield: 0,
+      rapidUntil: 0,
       weapon: "rifle",
       ammo: Infinity,
       lastShot: 0,
@@ -256,9 +272,10 @@ function makeEnemy(type, x, levelIndex = 0) {
   }[type];
   const isAirborne = Boolean(stats.airborne);
   const isBoss = Boolean(stats.boss);
-  const hpScale = isBoss ? 1 + (difficulty - 1) * 0.75 : difficulty;
-  const speedScale = 1 + (difficulty - 1) * 0.12;
-  const cooldownScale = Math.max(0.38, 1 / difficulty);
+  const hpScale = isBoss ? 1 + (difficulty - 1) * 0.55 : 1 + (difficulty - 1) * 0.72;
+  const damageScale = 1 + (difficulty - 1) * 0.52;
+  const speedScale = 1 + (difficulty - 1) * 0.08;
+  const cooldownScale = Math.max(0.58, 1 / (1 + (difficulty - 1) * 0.62));
   const height = isBoss ? 112 : isAirborne ? 44 : 62;
   const width = isBoss ? 94 : isAirborne ? 54 : 42;
   return {
@@ -278,8 +295,8 @@ function makeEnemy(type, x, levelIndex = 0) {
     airborne: isAirborne,
     dropper: Boolean(stats.dropper),
     difficulty,
-    bulletDamage: Math.ceil(stats.damage * difficulty),
-    touchDamage: Math.ceil((stats.damage + 4) * difficulty),
+    bulletDamage: Math.ceil(stats.damage * damageScale),
+    touchDamage: Math.ceil((stats.damage + 4) * damageScale),
     shotCooldown: Math.max(260, stats.cooldown * cooldownScale),
     bulletSpeed: (isBoss ? 6 : isAirborne ? 6.6 : 5) * (1 + (difficulty - 1) * 0.08),
     shots: isBoss ? Math.min(5, 3 + Math.floor(levelIndex / 2)) : isAirborne && levelIndex >= 3 ? 2 : 1,
@@ -356,17 +373,27 @@ function update(dt) {
   const level = LEVELS[state.levelIndex];
   const p = state.player;
   p.invuln = Math.max(0, p.invuln - dt);
+  p.rapidUntil = Math.max(0, p.rapidUntil - dt);
 
   p.vx = 0;
+  p.crouching = input.down && p.onGround;
+  if (p.onGround) {
+    const nextH = p.crouching ? p.crouchH : p.standH;
+    if (p.h !== nextH) {
+      p.h = nextH;
+      p.y = p.groundY - p.h;
+    }
+  }
+  const moveSpeed = p.crouching ? 1.7 : 4.3;
   if (input.left) {
-    p.vx = -4.3;
+    p.vx = -moveSpeed;
     p.facing = -1;
   }
   if (input.right) {
-    p.vx = 4.3;
+    p.vx = moveSpeed;
     p.facing = 1;
   }
-  if (pressed.has("jump") && p.onGround) {
+  if (pressed.has("jump") && p.onGround && !p.crouching) {
     p.vy = -17;
     p.onGround = false;
   }
@@ -401,7 +428,8 @@ function update(dt) {
 function shoot() {
   const p = state.player;
   const weapon = WEAPONS[p.weapon];
-  if (state.time - p.lastShot < weapon.cooldown) return;
+  const cooldown = weapon.cooldown * (p.rapidUntil > 0 ? 0.58 : 1);
+  if (state.time - p.lastShot < cooldown) return;
   if (Number.isFinite(p.ammo) && p.ammo <= 0) {
     p.weapon = "rifle";
     p.ammo = Infinity;
@@ -409,7 +437,7 @@ function shoot() {
   }
   p.lastShot = state.time;
   if (Number.isFinite(p.ammo)) p.ammo -= 1;
-  const centerY = p.y + 31;
+  const centerY = p.y + (p.crouching ? 21 : 31);
   for (let i = 0; i < weapon.count; i++) {
     const offset = i - (weapon.count - 1) / 2;
     state.bullets.push({
@@ -647,10 +675,11 @@ function enemyShoot(e, dir) {
   for (let i = 0; i < shots; i++) {
     const offset = i - (shots - 1) / 2;
     const aimY = state.player.y + state.player.h * 0.45 - (e.y + e.h * 0.42);
+    const shotY = e.airborne || e.boss ? e.y + e.h * 0.42 : e.y + e.h * 0.28;
     const vy = e.airborne ? clamp(aimY / 90, -3.2, 3.2) + offset * 1.2 : offset * 1.4;
     state.enemyBullets.push({
       x: e.x + e.w / 2,
-      y: e.y + e.h * 0.42,
+      y: shotY,
       vx: e.bulletSpeed * dir,
       vy,
       r: e.boss ? 6 : e.airborne ? 5 : 4,
@@ -708,6 +737,31 @@ function applyPickup(type) {
     toast("榴彈補給");
     return;
   }
+  if (type === "shield") {
+    p.shield = Math.min(80, p.shield + 45);
+    toast("護盾 +45");
+    return;
+  }
+  if (type === "rapid") {
+    p.rapidUntil = Math.max(p.rapidUntil, 9000);
+    toast("急速射擊 9 秒");
+    return;
+  }
+  if (type === "ammo") {
+    if (Number.isFinite(p.ammo)) {
+      p.ammo += 45;
+    } else {
+      p.grenades += 2;
+    }
+    toast("彈藥補給");
+    return;
+  }
+  if (type === "life") {
+    p.lives = Math.min(5, p.lives + 1);
+    p.hp = 100;
+    toast("生命 +1");
+    return;
+  }
   p.weapon = type;
   p.ammo = WEAPONS[type].ammo;
   toast(`武器升級：${WEAPONS[type].label}`);
@@ -717,7 +771,14 @@ function hurtPlayer(amount) {
   const p = state.player;
   if (state.time - p.lastHurt < 900) return;
   p.lastHurt = state.time;
-  p.hp -= amount;
+  let remaining = amount;
+  if (p.shield > 0) {
+    const blocked = Math.min(p.shield, remaining);
+    p.shield -= blocked;
+    remaining -= blocked;
+    toast("護盾擋下攻擊");
+  }
+  p.hp -= remaining;
   p.invuln = 850;
   state.effects.push({ type: "hit", x: p.x + p.w / 2, y: p.y + p.h / 2, life: 230, max: 230 });
   if (p.hp <= 0) respawn();
@@ -732,10 +793,14 @@ function respawn() {
   }
   p.hp = 100;
   p.x = state.checkpointX;
+  p.h = p.standH;
   p.y = FLOOR - p.h;
   p.vx = 0;
   p.vy = 0;
+  p.crouching = false;
   p.invuln = 2200;
+  p.shield = 0;
+  p.rapidUntil = 0;
   p.weapon = "rifle";
   p.ammo = Infinity;
   state.enemyBullets = [];
@@ -805,8 +870,8 @@ function updateUi() {
   if (!state) return;
   const p = state.player;
   ui.level.textContent = `${state.levelIndex + 1}-5 ${LEVELS[state.levelIndex].name}`;
-  ui.lives.textContent = `${p.lives} / HP ${Math.max(0, Math.ceil(p.hp))}`;
-  ui.weapon.textContent = `${WEAPONS[p.weapon].label}${Number.isFinite(p.ammo) ? ` ${p.ammo}` : ""}`;
+  ui.lives.textContent = `${p.lives} / HP ${Math.max(0, Math.ceil(p.hp))}${p.shield > 0 ? ` / S ${Math.ceil(p.shield)}` : ""}`;
+  ui.weapon.textContent = `${WEAPONS[p.weapon].label}${Number.isFinite(p.ammo) ? ` ${p.ammo}` : ""}${p.rapidUntil > 0 ? " 快" : ""}`;
   ui.score.textContent = state.score.toString();
 }
 
@@ -891,22 +956,31 @@ function drawForeground(level, cam) {
 function drawPlayer(cam) {
   const p = state.player;
   const x = p.x - cam;
+  const crouch = p.crouching;
   ctx.save();
   ctx.globalAlpha = p.invuln > 0 && Math.floor(state.time / 90) % 2 === 0 ? 0.45 : 1;
+  if (p.shield > 0) {
+    ctx.strokeStyle = "rgba(122,215,255,0.85)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(x + p.w / 2, p.y + p.h / 2, 30, p.h * 0.62, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   ctx.fillStyle = "#234b74";
-  ctx.fillRect(x + 8, p.y + 24, 28, 38);
+  ctx.fillRect(x + 8, p.y + (crouch ? 22 : 24), 28, crouch ? 22 : 38);
   ctx.fillStyle = "#f0c08d";
-  ctx.fillRect(x + 10, p.y + 2, 24, 24);
+  ctx.fillRect(x + 10, p.y + (crouch ? 4 : 2), 24, crouch ? 20 : 24);
   ctx.fillStyle = "#2b2d31";
-  ctx.fillRect(x + 6, p.y - 4, 32, 10);
+  ctx.fillRect(x + 6, p.y + (crouch ? 0 : -4), 32, 10);
   ctx.fillStyle = "#1d2026";
-  ctx.fillRect(x + (p.facing > 0 ? 32 : -18), p.y + 31, 28, 8);
+  ctx.fillRect(x + (p.facing > 0 ? 32 : -18), p.y + (crouch ? 28 : 31), 28, 8);
   ctx.fillStyle = "#23313b";
-  ctx.fillRect(x + 9, p.y + 62, 10, 14);
-  ctx.fillRect(x + 26, p.y + 62, 10, 14);
+  ctx.fillRect(x + 9, p.y + (crouch ? 38 : 62), 10, crouch ? 8 : 14);
+  ctx.fillRect(x + 26, p.y + (crouch ? 38 : 62), 10, crouch ? 8 : 14);
   ctx.restore();
 
   drawBar(x - 4, p.y - 16, 50, 6, p.hp / 100, "#56d68a");
+  if (p.shield > 0) drawBar(x - 4, p.y - 25, 50, 5, p.shield / 80, "#7ad7ff");
 }
 
 function drawEnemies(cam) {
@@ -950,13 +1024,24 @@ function drawPickups(cam) {
     const x = item.x - cam;
     if (x < -50 || x > WIDTH + 50) continue;
     const y = item.y + Math.sin(item.bob) * 7;
-    const colors = { spread: "#f2c94c", laser: "#7ad7ff", rocket: "#ff8a47", heal: "#56d68a", grenades: "#c49bff" };
+    const colors = {
+      spread: "#f2c94c",
+      laser: "#7ad7ff",
+      rocket: "#ff8a47",
+      heal: "#56d68a",
+      grenades: "#c49bff",
+      shield: "#7ad7ff",
+      rapid: "#ffdf5d",
+      ammo: "#d2c39f",
+      life: "#ff8fb1"
+    };
+    const labels = { heal: "+", shield: "S", rapid: "R", ammo: "A", life: "1" };
     ctx.fillStyle = colors[item.type];
     ctx.fillRect(x, y, item.w, item.h);
     ctx.fillStyle = "#1a1814";
     ctx.font = "700 18px system-ui";
     ctx.textAlign = "center";
-    ctx.fillText(item.type === "heal" ? "+" : item.type[0].toUpperCase(), x + item.w / 2, y + 23);
+    ctx.fillText(labels[item.type] || item.type[0].toUpperCase(), x + item.w / 2, y + 23);
   }
 }
 
@@ -1052,6 +1137,7 @@ function bindControls() {
     if (event.repeat) return;
     if (event.code === "KeyA" || event.code === "ArrowLeft") input.left = true;
     if (event.code === "KeyD" || event.code === "ArrowRight") input.right = true;
+    if (event.code === "KeyS" || event.code === "ArrowDown") input.down = true;
     if (event.code === "KeyJ") input.shoot = true;
     if (event.code === "KeyW" || event.code === "Space" || event.code === "ArrowUp") pressed.add("jump");
     if (event.code === "KeyK") pressed.add("grenade");
@@ -1060,6 +1146,7 @@ function bindControls() {
   window.addEventListener("keyup", (event) => {
     if (event.code === "KeyA" || event.code === "ArrowLeft") input.left = false;
     if (event.code === "KeyD" || event.code === "ArrowRight") input.right = false;
+    if (event.code === "KeyS" || event.code === "ArrowDown") input.down = false;
     if (event.code === "KeyJ") input.shoot = false;
   });
   document.querySelectorAll("[data-hold]").forEach((button) => {

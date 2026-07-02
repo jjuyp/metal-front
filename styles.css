@@ -166,6 +166,11 @@ button:active {
   box-shadow: 0 3px 0 #8e2c25;
 }
 
+.actions button:nth-child(2) {
+  background: rgba(122, 215, 255, 0.94);
+  box-shadow: 0 3px 0 #2d6f91;
+}
+
 .actions button:last-child {
   background: rgba(86, 214, 138, 0.94);
   box-shadow: 0 3px 0 #257342;
@@ -349,11 +354,11 @@ h1 {
 
   .stick,
   .actions {
-    gap: 7px;
+    gap: 6px;
   }
 
   .controls button {
-    width: 50px;
+    width: 48px;
     height: 44px;
     border-radius: 7px;
     font-size: 14px;
@@ -361,7 +366,7 @@ h1 {
   }
 
   .actions button:first-child {
-    width: 60px;
+    width: 56px;
   }
 
   .panel {
